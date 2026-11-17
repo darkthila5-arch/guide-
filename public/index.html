@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FF Guild Glory Bot</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0d0d0d; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 40px 20px; }
+    h1 { font-size: 1.8rem; color: #ff6b1a; margin-bottom: 8px; letter-spacing: 1px; }
+    .sub { color: #666; font-size: 0.85rem; margin-bottom: 32px; }
+    .card { background: #161616; border: 1px solid #2a2a2a; border-radius: 12px; padding: 28px; width: 100%; max-width: 520px; margin-bottom: 20px; }
+    .card h2 { font-size: 1rem; color: #ff6b1a; margin-bottom: 20px; }
+    label { display: block; font-size: 0.8rem; color: #888; margin-bottom: 6px; margin-top: 14px; }
+    input, select { width: 100%; background: #1e1e1e; border: 1px solid #333; border-radius: 8px; color: #e0e0e0; padding: 10px 14px; font-size: 0.9rem; outline: none; transition: border 0.2s; }
+    input:focus, select:focus { border-color: #ff6b1a; }
+    .btn-row { display: flex; gap: 10px; margin-top: 20px; }
+    button { flex: 1; padding: 11px; border: none; border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
+    button:hover { opacity: 0.85; }
+    .btn-start { background: #ff6b1a; color: #000; }
+    .btn-stop { background: #333; color: #e0e0e0; }
+    .status-bar { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; }
+    .stat { background: #1e1e1e; border: 1px solid #2a2a2a; border-radius: 8px; padding: 12px 16px; flex: 1; min-width: 100px; text-align: center; }
+    .stat-val { font-size: 1.4rem; color: #ff6b1a; font-weight: 700; }
+    .stat-lbl { font-size: 0.72rem; color: #555; margin-top: 4px; }
+    .log-box { background: #111; border: 1px solid #222; border-radius: 8px; padding: 14px; height: 220px; overflow-y: auto; font-family: monospace; font-size: 0.75rem; color: #7fff7f; line-height: 1.6; margin-top: 16px; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: #333; }
+    .dot.on { background: #3dff6b; box-shadow: 0 0 6px #3dff6b; }
+    .pill { display: inline-flex; align-items: center; font-size: 0.75rem; color: #888; margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <h1>⚡ FF GUILD GLORY BOT</h1>
+  <p class="sub">Auto-contributes glory to your Free Fire guild via match loops</p>
+  <div class="card">
+    <h2>CONFIGURATION</h2>
+    <label>Guild ID</label>
+    <input id="guildId" type="text" placeholder="e.g. 3001234567">
+    <label>Account Token (Bearer)</label>
+    <input id="token" type="password" placeholder="Paste your auth token">
+    <label>Region</label>
+    <select id="region">
+      <option value="IND">India (IND)</option>
+      <option value="SG">Singapore (SG)</option>
+      <option value="ID">Indonesia (ID)</option>
+      <option value="BR">Brazil (BR)</option>
+      <option value="VN">Vietnam (VN)</option>
+      <option value="TH">Thailand (TH)</option>
+      <option value="TW">Taiwan (TW)</option>
+      <option value="US">Americas (US)</option>
+      <option value="PK">Pakistan (PK)</option>
+      <option value="MENA">MENA</option>
+    </select>
+    <label>Loop Count (0 = infinite)</label>
+    <input id="loops" type="number" value="0" min="0">
+    <div class="btn-row">
+      <button class="btn-start" onclick="startBot()">▶ START BOT</button>
+      <button class="btn-stop" onclick="stopBot()">■ STOP</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="pill"><span class="dot" id="statusDot"></span><span id="statusText">Idle</span></div>
+    <div class="status-bar">
+      <div class="stat"><div class="stat-val" id="valGlory">0</div><div class="stat-lbl">Glory Earned</div></div>
+      <div class="stat"><div class="stat-val" id="valMatches">0</div><div class="stat-lbl">Matches</div></div>
+      <div class="stat"><div class="stat-val" id="valUptime">0s</div><div class="stat-lbl">Uptime</div></div>
+    </div>
+    <div class="log-box" id="logBox">— waiting for bot start —</div>
+  </div>
+  <script>
+    let pollInterval = null;
+    let currentGuild = null;
+    function fmtTime(s) {
+      if (s < 60) return s + 's';
+      if (s < 3600) return Math.floor(s/60) + 'm ' + (s%60) + 's';
+      return Math.floor(s/3600) + 'h ' + Math.floor((s%3600)/60) + 'm';
+    }
+    async function startBot() {
+      const guildId = document.getElementById('guildId').value.trim();
+      const token = document.getElementById('token').value.trim();
+      const region = document.getElementById('region').value;
+      const loopCount = document.getElementById('loops').value;
+      if (!guildId || !token) { alert('Guild ID and Token are required'); return; }
+      const res = await fetch('/api/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guildId, accountToken: token, region, loopCount }) });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error); return; }
+      currentGuild = guildId;
+      document.getElementById('statusDot').className = 'dot on';
+      document.getElementById('statusText').textContent = `Running → ${guildId}`;
+      document.getElementById('logBox').textContent = '';
+      clearInterval(pollInterval);
+      pollInterval = setInterval(pollStatus, 2500);
+    }
+    async function stopBot() {
+      if (!currentGuild) return;
+      await fetch('/api/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guildId: currentGuild }) });
+      clearInterval(pollInterval);
+      document.getElementById('statusDot').className = 'dot';
+      document.getElementById('statusText').textContent = 'Stopped';
+    }
+    async function pollStatus() {
+      if (!currentGuild) return;
+      const res = await fetch(`/api/status/${currentGuild}`);
+      if (!res.ok) return;
+      const d = await res.json();
+      document.getElementById('valGlory').textContent = d.glory;
+      document.getElementById('valMatches').textContent = d.loops;
+      document.getElementById('valUptime').textContent = fmtTime(d.uptime);
+      if (!d.running) { clearInterval(pollInterval); document.getElementById('statusDot').className = 'dot'; document.getElementById('statusText').textContent = 'Stopped'; }
+      const box = document.getElementById('logBox');
+      box.innerHTML = d.logs.join('\n');
+      box.scrollTop = box.scrollHeight;
+    }
+  </script>
+</body>
+</html>
