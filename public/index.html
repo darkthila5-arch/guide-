@@ -14,6 +14,7 @@
     label { display: block; font-size: 0.8rem; color: #888; margin-bottom: 6px; margin-top: 14px; }
     input, select { width: 100%; background: #1e1e1e; border: 1px solid #333; border-radius: 8px; color: #e0e0e0; padding: 10px 14px; font-size: 0.9rem; outline: none; transition: border 0.2s; }
     input:focus, select:focus { border-color: #ff6b1a; }
+    .hint { font-size: 0.72rem; color: #555; margin-top: 4px; }
     .btn-row { display: flex; gap: 10px; margin-top: 20px; }
     button { flex: 1; padding: 11px; border: none; border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
     button:hover { opacity: 0.85; }
@@ -23,7 +24,7 @@
     .stat { background: #1e1e1e; border: 1px solid #2a2a2a; border-radius: 8px; padding: 12px 16px; flex: 1; min-width: 100px; text-align: center; }
     .stat-val { font-size: 1.4rem; color: #ff6b1a; font-weight: 700; }
     .stat-lbl { font-size: 0.72rem; color: #555; margin-top: 4px; }
-    .log-box { background: #111; border: 1px solid #222; border-radius: 8px; padding: 14px; height: 220px; overflow-y: auto; font-family: monospace; font-size: 0.75rem; color: #7fff7f; line-height: 1.6; margin-top: 16px; }
+    .log-box { background: #111; border: 1px solid #222; border-radius: 8px; padding: 14px; height: 220px; overflow-y: auto; font-family: monospace; font-size: 0.75rem; color: #7fff7f; line-height: 1.6; margin-top: 16px; white-space: pre-wrap; }
     .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: #333; }
     .dot.on { background: #3dff6b; box-shadow: 0 0 6px #3dff6b; }
     .pill { display: inline-flex; align-items: center; font-size: 0.75rem; color: #888; margin-bottom: 16px; }
@@ -31,13 +32,22 @@
 </head>
 <body>
   <h1>⚡ FF GUILD GLORY BOT</h1>
-  <p class="sub">Auto-contributes glory to your Free Fire guild via match loops</p>
+  <p class="sub">Guild ID, UID, Password දාලා START ගහන්න — ඉතිරිය bot කරනවා</p>
+
   <div class="card">
     <h2>CONFIGURATION</h2>
+
     <label>Guild ID</label>
     <input id="guildId" type="text" placeholder="e.g. 3001234567">
-    <label>Account Token (Bearer)</label>
-    <input id="token" type="password" placeholder="Paste your auth token">
+
+    <label>Account UID</label>
+    <input id="uid" type="text" placeholder="e.g. 4853779388">
+    <div class="hint">Zarchiver එකෙන් හම්බු com.garena.msdk.guest_uid</div>
+
+    <label>Account Password</label>
+    <input id="password" type="password" placeholder="e.g. 7EA29B468DF2...">
+    <div class="hint">Zarchiver එකෙන් හම්බු com.garena.msdk.guest_password</div>
+
     <label>Region</label>
     <select id="region">
       <option value="IND">India (IND)</option>
@@ -51,64 +61,93 @@
       <option value="PK">Pakistan (PK)</option>
       <option value="MENA">MENA</option>
     </select>
-    <label>Loop Count (0 = infinite)</label>
+
+    <label>Loop Count (0 = ඉවර වෙනකම්)</label>
     <input id="loops" type="number" value="0" min="0">
+
     <div class="btn-row">
-      <button class="btn-start" onclick="startBot()">▶ START BOT</button>
+      <button class="btn-start" onclick="startBot()">▶ START</button>
       <button class="btn-stop" onclick="stopBot()">■ STOP</button>
     </div>
   </div>
+
   <div class="card">
     <div class="pill"><span class="dot" id="statusDot"></span><span id="statusText">Idle</span></div>
     <div class="status-bar">
-      <div class="stat"><div class="stat-val" id="valGlory">0</div><div class="stat-lbl">Glory Earned</div></div>
+      <div class="stat"><div class="stat-val" id="valGlory">0</div><div class="stat-lbl">Glory</div></div>
       <div class="stat"><div class="stat-val" id="valMatches">0</div><div class="stat-lbl">Matches</div></div>
       <div class="stat"><div class="stat-val" id="valUptime">0s</div><div class="stat-lbl">Uptime</div></div>
     </div>
-    <div class="log-box" id="logBox">— waiting for bot start —</div>
+    <div class="log-box" id="logBox">— bot start කරන්න ඉහළ fields fill කරන්න —</div>
   </div>
+
   <script>
     let pollInterval = null;
     let currentGuild = null;
+
     function fmtTime(s) {
       if (s < 60) return s + 's';
       if (s < 3600) return Math.floor(s/60) + 'm ' + (s%60) + 's';
       return Math.floor(s/3600) + 'h ' + Math.floor((s%3600)/60) + 'm';
     }
+
     async function startBot() {
-      const guildId = document.getElementById('guildId').value.trim();
-      const token = document.getElementById('token').value.trim();
-      const region = document.getElementById('region').value;
+      const guildId  = document.getElementById('guildId').value.trim();
+      const uid      = document.getElementById('uid').value.trim();
+      const password = document.getElementById('password').value.trim();
+      const region   = document.getElementById('region').value;
       const loopCount = document.getElementById('loops').value;
-      if (!guildId || !token) { alert('Guild ID and Token are required'); return; }
-      const res = await fetch('/api/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guildId, accountToken: token, region, loopCount }) });
+
+      if (!guildId || !uid || !password) {
+        alert('Guild ID, UID සහ Password ඕනෙම!'); return;
+      }
+
+      const res = await fetch('/api/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guildId, uid, password, region, loopCount })
+      });
       const data = await res.json();
       if (!res.ok) { alert(data.error); return; }
+
       currentGuild = guildId;
       document.getElementById('statusDot').className = 'dot on';
       document.getElementById('statusText').textContent = `Running → ${guildId}`;
-      document.getElementById('logBox').textContent = '';
+      document.getElementById('logBox').textContent = 'Logging in...';
       clearInterval(pollInterval);
       pollInterval = setInterval(pollStatus, 2500);
     }
+
     async function stopBot() {
       if (!currentGuild) return;
-      await fetch('/api/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guildId: currentGuild }) });
+      await fetch('/api/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guildId: currentGuild })
+      });
       clearInterval(pollInterval);
       document.getElementById('statusDot').className = 'dot';
       document.getElementById('statusText').textContent = 'Stopped';
     }
+
     async function pollStatus() {
       if (!currentGuild) return;
       const res = await fetch(`/api/status/${currentGuild}`);
       if (!res.ok) return;
       const d = await res.json();
+
       document.getElementById('valGlory').textContent = d.glory;
       document.getElementById('valMatches').textContent = d.loops;
       document.getElementById('valUptime').textContent = fmtTime(d.uptime);
-      if (!d.running) { clearInterval(pollInterval); document.getElementById('statusDot').className = 'dot'; document.getElementById('statusText').textContent = 'Stopped'; }
+
+      if (!d.running) {
+        clearInterval(pollInterval);
+        document.getElementById('statusDot').className = 'dot';
+        document.getElementById('statusText').textContent = 'Stopped';
+      }
+
       const box = document.getElementById('logBox');
-      box.innerHTML = d.logs.join('\n');
+      box.textContent = d.logs.join('\n');
       box.scrollTop = box.scrollHeight;
     }
   </script>

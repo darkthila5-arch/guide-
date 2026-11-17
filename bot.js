@@ -35,9 +35,51 @@ function buildHeaders(token) {
   };
 }
 
+// Auto login using uid + password → returns token
+async function getToken(uid, password, region) {
+  const loginUrls = [
+    `https://loginbp.ggblueshark.com/MajorLogin`,
+    `https://ff.garena.com/api/login/guest`,
+    `https://loginbp.${region.toLowerCase()}.freefiremobile.com/MajorLogin`
+  ];
+
+  const payload = {
+    uid: uid,
+    password: password,
+    version: '1.95.6',
+    lang: 'en',
+    region: region
+  };
+
+  for (const url of loginUrls) {
+    try {
+      const r = await axios.post(url, payload, {
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 11)',
+          'X-Garena-Client': '1.95.6'
+        },
+        timeout: 10000
+      });
+
+      const token = r.data?.token
+        || r.data?.data?.token
+        || r.data?.accessToken
+        || r.data?.data?.accessToken;
+
+      if (token) return token;
+    } catch (e) {
+      continue;
+    }
+  }
+  throw new Error('Login failed — could not get token from any endpoint');
+}
+
 async function joinGuild(host, token, guildId) {
   try {
-    const r = await axios.post(`${host}/guild/join`, { guildId }, { headers: buildHeaders(token), timeout: 10000 });
+    const r = await axios.post(`${host}/guild/join`, { guildId }, {
+      headers: buildHeaders(token), timeout: 10000
+    });
     return r.data;
   } catch (e) {
     if (e.response?.data?.code === 10015) return { already_member: true };
@@ -54,11 +96,12 @@ async function fetchGuildInfo(host, token, guildId) {
 
 async function submitGloryMatch(host, token, guildId, result = 'WIN') {
   const payload = {
-    guildId, matchType: 1, result, score: result === 'WIN' ? 1 : 0,
+    guildId, matchType: 1, result,
+    score: result === 'WIN' ? 1 : 0,
     kills: Math.floor(Math.random() * 8) + (result === 'WIN' ? 5 : 1),
     placement: result === 'WIN' ? 1 : (result === 'TOP5' ? Math.floor(Math.random() * 4) + 2 : Math.floor(Math.random() * 45) + 6),
     duration: Math.floor(Math.random() * 900) + 600,
-    mapId: [1, 2, 3, 4, 5][Math.floor(Math.random() * 5)]
+    mapId: [1,2,3,4,5][Math.floor(Math.random() * 5)]
   };
   const r = await axios.post(`${host}/guild/glory/contribute`, payload, {
     headers: buildHeaders(token), timeout: 15000
@@ -68,42 +111,61 @@ async function submitGloryMatch(host, token, guildId, result = 'WIN') {
 
 async function claimGloryCheckIn(host, token, guildId) {
   try {
-    const r = await axios.post(`${host}/guild/glory/checkin`, { guildId }, { headers: buildHeaders(token), timeout: 8000 });
+    const r = await axios.post(`${host}/guild/glory/checkin`, { guildId }, {
+      headers: buildHeaders(token), timeout: 8000
+    });
     return r.data;
   } catch (e) { return null; }
 }
 
-async function startGuildBot({ guildId, accountToken, region }, session) {
+async function startGuildBot({ guildId, uid, password, region }, session) {
   const host = REGION_HOSTS[region] || REGION_HOSTS['IND'];
-  log(session, `Initializing bot → Guild: ${guildId} | Region: ${region}`);
 
+  // Step 1: Auto login → get token
+  log(session, `Logging in with UID: ${uid}...`);
+  let token;
   try {
-    const joinResult = await joinGuild(host, accountToken, guildId);
-    log(session, joinResult.already_member ? 'Already a member — skipping join' : 'Joined guild successfully');
+    token = await getToken(uid, password, region);
+    log(session, `Login success — token received`);
   } catch (e) {
-    log(session, `Join failed: ${e.message} — aborting`);
+    log(session, `Login failed: ${e.message}`);
     session.running = false;
     return;
   }
 
   await DELAY(2000);
 
+  // Step 2: Join guild
   try {
-    const info = await fetchGuildInfo(host, accountToken, guildId);
-    log(session, `Guild verified — Current Glory: ${info?.guild?.gloryPoint || 0}`);
+    const j = await joinGuild(host, token, guildId);
+    log(session, j.already_member ? 'Already in guild — skipping join' : 'Joined guild');
   } catch (e) {
-    log(session, `Could not fetch guild info: ${e.message}`);
+    log(session, `Join error: ${e.message}`);
+    session.running = false;
+    return;
   }
 
-  const checkin = await claimGloryCheckIn(host, accountToken, guildId);
-  if (checkin) log(session, `Daily check-in claimed: +${checkin.reward || '?'} glory`);
+  await DELAY(2000);
 
-  let resultCycle = ['WIN','WIN','TOP5','WIN','PLAY','WIN','TOP5','WIN'];
+  // Step 3: Guild info
+  try {
+    const info = await fetchGuildInfo(host, token, guildId);
+    log(session, `Guild OK — Current Glory: ${info?.guild?.gloryPoint || 0}`);
+  } catch (e) {
+    log(session, `Guild info error: ${e.message}`);
+  }
+
+  // Step 4: Daily checkin
+  const checkin = await claimGloryCheckIn(host, token, guildId);
+  if (checkin) log(session, `Daily check-in: +${checkin.reward || '?'} glory`);
+
+  // Step 5: Match loop
+  const resultCycle = ['WIN','WIN','TOP5','WIN','PLAY','WIN','TOP5','WIN'];
   let cycleIdx = 0;
 
   while (session.running) {
     if (session.maxLoops > 0 && session.loops >= session.maxLoops) {
-      log(session, `Max loops (${session.maxLoops}) reached — stopping`);
+      log(session, `Max loops reached — stopping`);
       session.running = false;
       break;
     }
@@ -112,23 +174,37 @@ async function startGuildBot({ guildId, accountToken, region }, session) {
     cycleIdx++;
 
     try {
-      const matchData = await submitGloryMatch(host, accountToken, guildId, result);
+      const matchData = await submitGloryMatch(host, token, guildId, result);
       const gained = matchData?.gloryGained || MATCH_GLORY_REWARD[result];
       session.glory += gained;
       session.loops++;
-      log(session, `Match #${session.loops} → ${result} | +${gained} glory | Session total: ${session.glory}`);
+      log(session, `Match #${session.loops} → ${result} | +${gained} glory | Total: ${session.glory}`);
 
       const cooldown = 8000 + Math.floor(Math.random() * 7000);
-      log(session, `Cooldown: ${(cooldown/1000).toFixed(1)}s`);
       await DELAY(cooldown);
     } catch (e) {
-      log(session, `Match error: ${e.response?.data?.message || e.message}`);
-      if (e.response?.status === 429) { log(session, 'Rate limited — 60s backoff'); await DELAY(60000); }
-      else await DELAY(5000);
+      // Token expired — re-login
+      if (e.response?.status === 401) {
+        log(session, 'Token expired — re-logging in...');
+        try {
+          token = await getToken(uid, password, region);
+          log(session, 'Re-login success');
+        } catch (le) {
+          log(session, `Re-login failed: ${le.message}`);
+          session.running = false;
+          break;
+        }
+      } else if (e.response?.status === 429) {
+        log(session, 'Rate limited — waiting 60s');
+        await DELAY(60000);
+      } else {
+        log(session, `Error: ${e.response?.data?.message || e.message}`);
+        await DELAY(5000);
+      }
     }
   }
 
-  log(session, `Bot stopped — Glory: ${session.glory} | Matches: ${session.loops}`);
+  log(session, `Done — Glory: ${session.glory} | Matches: ${session.loops}`);
 }
 
 module.exports = { startGuildBot };
